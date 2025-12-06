@@ -3,12 +3,12 @@
   "package": "net.ditto.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
-
     "PlayerEntityMixin"
   ],
   "client": [
     "client.InGameHudMixin",
-    "client.KeyboardMixin"
+    "client.KeyboardMixin",
+    "client.ElytraFeatureRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

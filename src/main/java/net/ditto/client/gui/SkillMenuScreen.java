@@ -52,7 +52,6 @@ public class SkillMenuScreen extends Screen {
             slotButtons[i] = ButtonWidget.builder(Text.literal("Slot " + (i + 1)), (button) -> {
                         if (selectedSkill != null) {
                             equipSkill(slotIndex, selectedSkill);
-                            // Update button text immediately for visual feedback
                             updateButtonLabels();
                         }
                     })
@@ -62,7 +61,6 @@ public class SkillMenuScreen extends Screen {
             this.addDrawableChild(slotButtons[i]);
         }
 
-        // Initial label update
         updateButtonLabels();
     }
 
@@ -73,20 +71,16 @@ public class SkillMenuScreen extends Screen {
         for (int i = 0; i < 5; i++) {
             Skill s = player.getEquippedSkill(i);
             String name = (s == Skill.NONE) ? "Empty" : s.getName();
-            // If we just equipped something locally, override the text (networking delay might otherwise cause flicker)
-            // But for simplicity, we rely on the packet sync.
             slotButtons[i].setMessage(Text.literal("[" + (i + 1) + "] " + name));
         }
     }
 
     private void equipSkill(int slot, Skill skill) {
-        // 1. Send Packet to Server
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeInt(slot);
         buf.writeString(skill.name());
         ClientPlayNetworking.send(MagiaPackets.EQUIP_SKILL, buf);
 
-        // 2. Client-Side Prediction: Update local player immediately so the GUI reflects changes instantly
         IPlayerCombat player = (IPlayerCombat) MinecraftClient.getInstance().player;
         if (player != null) {
             player.setEquippedSkill(slot, skill);
@@ -95,16 +89,10 @@ public class SkillMenuScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Render Background (Darkens world)
         this.renderBackground(context);
-
-        // Render the List
         this.skillList.render(context, mouseX, mouseY, delta);
-
-        // Render Title
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 15, 0xFFFFFF);
 
-        // Render "Selected Info" area just above buttons
         if (selectedSkill != null) {
             int infoY = this.height - 75;
             Text nameText = Text.literal("Selected: " + selectedSkill.getName()).formatted(Formatting.GOLD, Formatting.BOLD);
@@ -116,7 +104,6 @@ public class SkillMenuScreen extends Screen {
             context.drawCenteredTextWithShadow(this.textRenderer, Text.literal("Select a skill above to bind it").formatted(Formatting.DARK_GRAY), this.width / 2, this.height - 70, 0xFFFFFF);
         }
 
-        // Render buttons and other children
         super.render(context, mouseX, mouseY, delta);
     }
 
@@ -134,8 +121,12 @@ public class SkillMenuScreen extends Screen {
             super(client, width, height, top, bottom, itemHeight);
 
             // Populate the list
+            IPlayerCombat pc = (IPlayerCombat) client.player;
+            if (pc == null) return;
+
             for (Skill skill : Skill.values()) {
-                if (skill != Skill.NONE) {
+                // --- MODIFIED: Only show unlocked skills ---
+                if (skill != Skill.NONE && pc.isSkillUnlocked(skill)) {
                     this.addEntry(new SkillEntry(skill));
                 }
             }
@@ -143,7 +134,7 @@ public class SkillMenuScreen extends Screen {
 
         @Override
         public int getRowWidth() {
-            return 220; // Width of the scrollable area content
+            return 220;
         }
 
         @Override
@@ -152,7 +143,7 @@ public class SkillMenuScreen extends Screen {
         }
 
         // =============================================================================================
-        // INNER CLASS: The List Entry (One Row)
+        // INNER CLASS: The List Entry
         // =============================================================================================
 
         class SkillEntry extends ElementListWidget.Entry<SkillEntry> {
@@ -164,25 +155,21 @@ public class SkillMenuScreen extends Screen {
 
             @Override
             public void render(DrawContext context, int index, int y, int x, int entryWidth, int entryHeight, int mouseX, int mouseY, boolean hovered, float tickDelta) {
-                // Background Highlight if selected or hovered
                 if (selectedSkill == this.skill) {
-                    context.fill(x, y, x + entryWidth, y + entryHeight, 0x44FFFFFF); // White overlay
-                    context.drawBorder(x, y, entryWidth, entryHeight, 0xFFFFFFFF);   // White border
+                    context.fill(x, y, x + entryWidth, y + entryHeight, 0x44FFFFFF);
+                    context.drawBorder(x, y, entryWidth, entryHeight, 0xFFFFFFFF);
                 } else if (hovered) {
-                    context.fill(x, y, x + entryWidth, y + entryHeight, 0x22FFFFFF); // Faint hover
+                    context.fill(x, y, x + entryWidth, y + entryHeight, 0x22FFFFFF);
                 }
 
-                // 1. Icon (Colored Box)
                 int iconSize = 16;
                 int iconX = x + 5;
                 int iconY = y + (entryHeight - iconSize) / 2;
                 context.fill(iconX, iconY, iconX + iconSize, iconY + iconSize, skill.getColor());
                 context.drawBorder(iconX, iconY, iconSize, iconSize, 0xFF000000);
 
-                // 2. Name
                 context.drawTextWithShadow(client.textRenderer, skill.getName(), iconX + iconSize + 10, y + 4, 0xFFFFFF);
 
-                // 3. Cooldown (Right aligned)
                 String cd = skill.getCooldownSeconds() + "s";
                 int cdWidth = client.textRenderer.getWidth(cd);
                 context.drawTextWithShadow(client.textRenderer, cd, x + entryWidth - cdWidth - 5, y + 8, 0xAAAAAA);
@@ -190,9 +177,8 @@ public class SkillMenuScreen extends Screen {
 
             @Override
             public boolean mouseClicked(double mouseX, double mouseY, int button) {
-                if (button == 0) { // Left Click
+                if (button == 0) {
                     SkillMenuScreen.this.setSelected(this.skill);
-                    // Play Click Sound
                     return true;
                 }
                 return false;

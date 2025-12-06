@@ -50,7 +50,15 @@ public class Magia implements ModInitializer {
             server.execute(() -> {
                 try {
                     Skill skill = Skill.valueOf(skillName);
-                    ((IPlayerCombat) player).setEquippedSkill(slot, skill);
+                    IPlayerCombat pc = (IPlayerCombat) player;
+
+                    // Validate: Can only equip if unlocked!
+                    if (skill != Skill.NONE && !pc.isSkillUnlocked(skill)) {
+                        LOGGER.warn("Player " + player.getName().getString() + " tried to equip locked skill: " + skillName);
+                        return;
+                    }
+
+                    pc.setEquippedSkill(slot, skill);
                     syncCombatToClient(player);
                 } catch (Exception e) {
                     LOGGER.error("Failed to equip skill: " + skillName);
@@ -58,7 +66,7 @@ public class Magia implements ModInitializer {
             });
         });
 
-        // 3. Use Skill (New)
+        // 3. Use Skill
         ServerPlayNetworking.registerGlobalReceiver(MagiaPackets.USE_SKILL, (server, player, handler, buf, responseSender) -> {
             int slot = buf.readInt();
             server.execute(() -> {
@@ -66,41 +74,26 @@ public class Magia implements ModInitializer {
                 Skill skill = combatPlayer.getEquippedSkill(slot);
 
                 if (skill != Skill.NONE) {
-                    // Logic for specific skills
                     switch (skill) {
                         case DASH -> {
-                            // Push player in direction they are looking
                             Vec3d look = player.getRotationVector();
-                            // Multiply for speed (e.g. 1.5 blocks/tick force)
                             player.setVelocity(look.x * 1.5, look.y * 1.5, look.z * 1.5);
-                            player.velocityModified = true; // Important to sync to client
-
-                            // Play sound
+                            player.velocityModified = true;
                             player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
                                     SoundEvents.ENTITY_ENDER_DRAGON_FLAP, SoundCategory.PLAYERS, 1.0f, 1.5f);
-
                             player.sendMessage(Text.literal("Dash!").formatted(Formatting.AQUA), true);
                         }
                         case FIREBALL -> {
                             Vec3d look = player.getRotationVector();
-                            // Create fireball (SmallFireballEntity doesn't destroy terrain as much as large ones)
-                            // Arguments: World, Shooter, AccelX, AccelY, AccelZ
                             SmallFireballEntity fireball = new SmallFireballEntity(player.getWorld(), player, look.x, look.y, look.z);
-
-                            // Set position to eye height so it doesn't spawn in feet
                             fireball.setPosition(player.getX(), player.getEyeY(), player.getZ());
-
-                            // Spawn
                             player.getWorld().spawnEntity(fireball);
-
-                            // Sound
                             player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
                                     SoundEvents.ENTITY_BLAZE_SHOOT, SoundCategory.PLAYERS, 1.0f, 1.0f);
-
                             player.sendMessage(Text.literal("Fireball!").formatted(Formatting.GOLD), true);
                         }
                         case HEAL -> {
-                            player.heal(4.0f); // Heals 2 hearts
+                            player.heal(4.0f);
                             player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
                                     SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, SoundCategory.PLAYERS, 1.0f, 1.0f);
                         }
@@ -108,8 +101,6 @@ public class Magia implements ModInitializer {
                             player.sendMessage(Text.literal("Skill implemented but no logic defined yet: " + skill.getName()), true);
                         }
                     }
-
-                    // Optional: Deduct Magia cost here in the future
                 }
             });
         });
@@ -123,6 +114,13 @@ public class Magia implements ModInitializer {
             if (playerRace.magia$getRace() == null) {
                 Race newRace = Race.getRandom();
                 playerRace.magia$setRace(newRace);
+
+                // --- NEW: Unlock Starting Skills for Race ---
+                IPlayerCombat pc = (IPlayerCombat) handler.player;
+                for (Skill s : newRace.getStartingSkills()) {
+                    pc.unlockSkill(s);
+                }
+
                 handler.player.sendMessage(
                         Text.literal("You have been reborn as a: ")
                                 .append(Text.literal(newRace.name()).formatted(Formatting.GOLD, Formatting.BOLD)),
@@ -132,6 +130,7 @@ public class Magia implements ModInitializer {
 
             Magia.syncMagiaToClient(handler.player);
             Magia.syncCombatToClient(handler.player);
+            Magia.syncUnlockedSkillsToClient(handler.player); // Sync on join
         });
 
         ServerPlayerEvents.COPY_FROM.register((oldPlayer, newPlayer, alive) -> {
@@ -141,12 +140,20 @@ public class Magia implements ModInitializer {
             IPlayerCombat oldC = (IPlayerCombat) oldPlayer;
             IPlayerCombat newC = (IPlayerCombat) newPlayer;
             newC.setCombatMode(oldC.isInCombatMode());
+
+            // Copy equipped
             for(int i=0; i<5; i++) {
                 newC.setEquippedSkill(i, oldC.getEquippedSkill(i));
             }
 
+            // Copy unlocked
+            for (Skill s : oldC.getUnlockedSkills()) {
+                newC.unlockSkill(s);
+            }
+
             syncMagiaToClient(newPlayer);
             syncCombatToClient(newPlayer);
+            syncUnlockedSkillsToClient(newPlayer);
         });
     }
 
@@ -165,5 +172,15 @@ public class Magia implements ModInitializer {
             buf.writeString(pc.getEquippedSkill(i).name());
         }
         ServerPlayNetworking.send(player, MagiaPackets.SYNC_COMBAT, buf);
+    }
+
+    public static void syncUnlockedSkillsToClient(ServerPlayerEntity player) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        IPlayerCombat pc = (IPlayerCombat) player;
+        buf.writeInt(pc.getUnlockedSkills().size());
+        for(Skill s : pc.getUnlockedSkills()) {
+            buf.writeString(s.name());
+        }
+        ServerPlayNetworking.send(player, MagiaPackets.SYNC_UNLOCKED, buf);
     }
 }

@@ -1,5 +1,6 @@
 package net.ditto.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.ditto.client.gui.SkillMenuScreen;
 import net.ditto.networking.MagiaPackets;
 import net.ditto.skill.Skill;
@@ -12,17 +13,21 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class MagiaClient implements ClientModInitializer {
 
     private static KeyBinding keySkillMenu;
     private static KeyBinding keyCombatMode;
+
+    // Vanilla widgets texture (contains hotbar, slots, etc.)
+    private static final Identifier WIDGETS_TEXTURE = new Identifier("textures/gui/widgets.png");
 
     @Override
     public void onInitializeClient() {
@@ -87,6 +92,26 @@ public class MagiaClient implements ClientModInitializer {
             });
         });
 
+        // 3. Unlocked Skills Sync
+        ClientPlayNetworking.registerGlobalReceiver(MagiaPackets.SYNC_UNLOCKED, (client, handler, buf, responseSender) -> {
+            int count = buf.readInt();
+            Skill[] unlocked = new Skill[count];
+            for(int i=0; i<count; i++) {
+                try { unlocked[i] = Skill.valueOf(buf.readString()); }
+                catch(Exception ignored) {}
+            }
+
+            client.execute(() -> {
+                if (client.player != null) {
+                    IPlayerCombat pc = (IPlayerCombat) client.player;
+                    // Add unlocked skills to the player's local data
+                    for (Skill s : unlocked) {
+                        if (s != null) pc.unlockSkill(s);
+                    }
+                }
+            });
+        });
+
         // --- HUD Rendering ---
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -134,36 +159,55 @@ public class MagiaClient implements ClientModInitializer {
         int width = client.getWindow().getScaledWidth();
         int height = client.getWindow().getScaledHeight();
 
-        // Center of the screen, bottom
-        int slotSize = 20;
-        int gap = 4;
-        int totalWidth = (5 * slotSize) + (4 * gap);
+        // Use the vanilla "offhand slot" texture size (22x22) which looks like a standard slot
+        int slotSize = 22;
+        int totalWidth = 5 * slotSize;
         int startX = (width - totalWidth) / 2;
         int startY = height - 22; // Just above bottom edge
 
-        // Draw "Combat Mode" indicator
-        context.drawCenteredTextWithShadow(client.textRenderer, Text.literal("COMBAT MODE"), width / 2, startY - 15, 0xFF4500);
+        // Draw "Magia" indicator above the bar
+        context.drawCenteredTextWithShadow(client.textRenderer, Text.literal("◆ MAGIA ◆").formatted(Formatting.GOLD), width / 2, startY - 12, 0xFFFFFF);
+
+        RenderSystem.enableBlend();
 
         for (int i = 0; i < 5; i++) {
-            int slotX = startX + (i * (slotSize + gap));
+            int slotX = startX + (i * slotSize);
             Skill skill = pc.getEquippedSkill(i);
 
-            // Slot Background
-            context.fill(slotX, startY, slotX + slotSize, startY + slotSize, 0xAA000000);
-            context.drawBorder(slotX, startY, slotSize, slotSize, 0xFFFFFFFF);
+            // 1. Draw Slot Background (Vanilla Texture)
+            // U: 24, V: 22 is the standard square slot texture in widgets.png
+            context.drawTexture(WIDGETS_TEXTURE, slotX, startY, 24, 22, 22, 22);
 
-            // Skill Icon (Colored Box for now)
+            // 2. Skill Icon (Colored Box)
             if (skill != Skill.NONE) {
-                int padding = 2;
-                context.fill(slotX + padding, startY + padding, slotX + slotSize - padding, startY + slotSize - padding, skill.getColor());
+                int padding = 3;
+                int size = 16;
+
+                // Ensure color is opaque (or add 0xFF000000 alpha)
+                int color = skill.getColor();
+                if ((color & 0xFF000000) == 0) {
+                    color |= 0xFF000000;
+                }
+
+                context.fill(slotX + padding, startY + padding, slotX + padding + size, startY + padding + size, color);
             }
 
-            // Key Number
+            // 3. Key Number (Small text in corner)
             String keyNum = String.valueOf(i + 1);
             context.getMatrices().push();
             context.getMatrices().translate(0, 0, 200); // Bring to front
-            context.drawTextWithShadow(client.textRenderer, keyNum, slotX + 2, startY + 2, 0xFFFFFF);
+
+            float scale = 0.6f;
+            context.getMatrices().scale(scale, scale, 1.0f);
+
+            // Adjust coordinates for scaling
+            int textX = (int) ((slotX + 2) / scale);
+            int textY = (int) ((startY + 2) / scale);
+
+            context.drawTextWithShadow(client.textRenderer, keyNum, textX, textY, 0xFFFFFF);
             context.getMatrices().pop();
         }
+
+        RenderSystem.disableBlend();
     }
 }

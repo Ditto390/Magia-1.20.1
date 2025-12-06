@@ -9,4 +9,7 @@ public class MagiaPackets {
     public static final Identifier EQUIP_SKILL = new Identifier(Magia.MOD_ID, "equip_skill");
     public static final Identifier SYNC_COMBAT = new Identifier(Magia.MOD_ID, "sync_combat");
     public static final Identifier USE_SKILL = new Identifier(Magia.MOD_ID, "use_skill");
+
+    // New Packet
+    public static final Identifier SYNC_UNLOCKED = new Identifier(Magia.MOD_ID, "sync_unlocked");
 }
