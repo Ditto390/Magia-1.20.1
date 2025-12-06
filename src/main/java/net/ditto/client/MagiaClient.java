@@ -4,8 +4,10 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.ditto.client.gui.SkillMenuScreen;
 import net.ditto.networking.MagiaPackets;
 import net.ditto.skill.Skill;
+import net.ditto.race.Race;
 import net.ditto.util.IPlayerCombat;
 import net.ditto.util.IPlayerMagia;
+import net.ditto.util.IPlayerRace;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -107,6 +109,22 @@ public class MagiaClient implements ClientModInitializer {
                     // Add unlocked skills to the player's local data
                     for (Skill s : unlocked) {
                         if (s != null) pc.unlockSkill(s);
+                    }
+                }
+            });
+        });
+
+        // 4. Race Sync (Added)
+        ClientPlayNetworking.registerGlobalReceiver(MagiaPackets.SYNC_RACE, (client, handler, buf, responseSender) -> {
+            String raceName = buf.readString();
+            client.execute(() -> {
+                if (client.player != null) {
+                    try {
+                        Race race = Race.valueOf(raceName);
+                        ((IPlayerRace) client.player).magia$setRace(race);
+                    } catch (IllegalArgumentException e) {
+                        // Handle "NONE" or invalid race names smoothly
+                        // If it's NONE, we might want to set race to null or just ignore
                     }
                 }
             });

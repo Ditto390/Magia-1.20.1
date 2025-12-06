@@ -1,5 +1,6 @@
 package net.ditto;
 
+import net.ditto.command.MagiaCommand; // Import the command
 import net.ditto.networking.MagiaPackets;
 import net.ditto.race.Race;
 import net.ditto.skill.Skill;
@@ -29,6 +30,9 @@ public class Magia implements ModInitializer {
     @Override
     public void onInitialize() {
         LOGGER.info("Initializing Magia Mod...");
+
+        // --- REGISTER COMMANDS ---
+        MagiaCommand.register();
 
         // --- NETWORKING RECEIVERS ---
 
@@ -74,6 +78,25 @@ public class Magia implements ModInitializer {
                 Skill skill = combatPlayer.getEquippedSkill(slot);
 
                 if (skill != Skill.NONE) {
+                    // --- SKILL PROGRESSION TRACKING ---
+                    combatPlayer.incrementSkillUsage(skill);
+
+                    // Test: Dash -> Super Dash (5 uses)
+                    if (skill == Skill.DASH) {
+                        int usage = combatPlayer.getSkillUsage(Skill.DASH);
+                        if (usage >= 5 && !combatPlayer.isSkillUnlocked(Skill.SUPER_DASH)) {
+                            combatPlayer.unlockSkill(Skill.SUPER_DASH);
+                            syncUnlockedSkillsToClient(player);
+                            player.sendMessage(
+                                    Text.literal("UNLOCKED NEW SKILL: SUPER DASH!")
+                                            .formatted(Formatting.LIGHT_PURPLE, Formatting.BOLD),
+                                    false
+                            );
+                            player.playSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundCategory.MASTER, 1.0f, 1.0f);
+                        }
+                    }
+
+                    // --- SKILL EXECUTION ---
                     switch (skill) {
                         case DASH -> {
                             Vec3d look = player.getRotationVector();
@@ -82,6 +105,17 @@ public class Magia implements ModInitializer {
                             player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
                                     SoundEvents.ENTITY_ENDER_DRAGON_FLAP, SoundCategory.PLAYERS, 1.0f, 1.5f);
                             player.sendMessage(Text.literal("Dash!").formatted(Formatting.AQUA), true);
+                        }
+                        case SUPER_DASH -> {
+                            Vec3d look = player.getRotationVector();
+                            // Stronger and faster than normal Dash
+                            player.setVelocity(look.x * 3.0, look.y * 1.5, look.z * 3.0);
+                            player.velocityModified = true;
+                            player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
+                                    SoundEvents.ENTITY_GENERIC_EXPLODE, SoundCategory.PLAYERS, 0.5f, 2.0f);
+                            player.getWorld().playSound(null, player.getX(), player.getY(), player.getZ(),
+                                    SoundEvents.ENTITY_ENDER_DRAGON_FLAP, SoundCategory.PLAYERS, 1.0f, 0.5f);
+                            player.sendMessage(Text.literal("SUPER DASH!").formatted(Formatting.LIGHT_PURPLE), true);
                         }
                         case FIREBALL -> {
                             Vec3d look = player.getRotationVector();
@@ -115,7 +149,6 @@ public class Magia implements ModInitializer {
                 Race newRace = Race.getRandom();
                 playerRace.magia$setRace(newRace);
 
-                // --- NEW: Unlock Starting Skills for Race ---
                 IPlayerCombat pc = (IPlayerCombat) handler.player;
                 for (Skill s : newRace.getStartingSkills()) {
                     pc.unlockSkill(s);
@@ -128,9 +161,7 @@ public class Magia implements ModInitializer {
                 );
             }
 
-            Magia.syncMagiaToClient(handler.player);
-            Magia.syncCombatToClient(handler.player);
-            Magia.syncUnlockedSkillsToClient(handler.player); // Sync on join
+            Magia.syncAllToClient(handler.player); // Use helper here too
         });
 
         ServerPlayerEvents.COPY_FROM.register((oldPlayer, newPlayer, alive) -> {
@@ -151,10 +182,29 @@ public class Magia implements ModInitializer {
                 newC.unlockSkill(s);
             }
 
-            syncMagiaToClient(newPlayer);
-            syncCombatToClient(newPlayer);
-            syncUnlockedSkillsToClient(newPlayer);
+            // Copy skill usages
+            for (Skill s : Skill.values()) {
+                newC.setSkillUsage(s, oldC.getSkillUsage(s));
+            }
+
+            // Note: Syncing here is good, but AFTER_RESPAWN ensures the client world is ready
+            syncAllToClient(newPlayer);
         });
+
+        // --- NEW: Sync After Respawn ---
+        // This ensures the client receives the data AFTER the respawn process is fully complete.
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            syncAllToClient(newPlayer);
+        });
+    }
+
+    // --- HELPER METHODS ---
+
+    public static void syncAllToClient(ServerPlayerEntity player) {
+        syncMagiaToClient(player);
+        syncCombatToClient(player);
+        syncUnlockedSkillsToClient(player);
+        syncRaceToClient(player);
     }
 
     public static void syncMagiaToClient(ServerPlayerEntity player) {
@@ -182,5 +232,16 @@ public class Magia implements ModInitializer {
             buf.writeString(s.name());
         }
         ServerPlayNetworking.send(player, MagiaPackets.SYNC_UNLOCKED, buf);
+    }
+
+    public static void syncRaceToClient(ServerPlayerEntity player) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        Race race = ((IPlayerRace)player).magia$getRace();
+        if (race != null) {
+            buf.writeString(race.name());
+        } else {
+            buf.writeString("NONE");
+        }
+        ServerPlayNetworking.send(player, MagiaPackets.SYNC_RACE, buf);
     }
 }

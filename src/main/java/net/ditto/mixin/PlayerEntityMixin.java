@@ -23,7 +23,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 @Mixin(PlayerEntity.class)
@@ -50,6 +52,7 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
     @Unique private Skill[] equippedSkills = new Skill[]{Skill.NONE, Skill.NONE, Skill.NONE, Skill.NONE, Skill.NONE};
 
     @Unique private final Set<Skill> unlockedSkills = new HashSet<>();
+    @Unique private final Map<Skill, Integer> skillUsage = new HashMap<>();
 
     @Override
     public boolean isInCombatMode() {
@@ -80,6 +83,11 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
     }
 
     @Override
+    public void clearUnlockedSkills() {
+        this.unlockedSkills.clear();
+    }
+
+    @Override
     public boolean isSkillUnlocked(Skill skill) {
         return this.unlockedSkills.contains(skill);
     }
@@ -87,6 +95,16 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
     @Override
     public Set<Skill> getUnlockedSkills() {
         return this.unlockedSkills;
+    }
+
+    @Override
+    public int getSkillUsage(Skill skill) {
+        return this.skillUsage.getOrDefault(skill, 0);
+    }
+
+    @Override
+    public void setSkillUsage(Skill skill, int count) {
+        this.skillUsage.put(skill, count);
     }
 
     // =============================================================
@@ -98,12 +116,7 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
     public void magia$arachneLeap(CallbackInfo ci) {
         if (this.magia$race == Race.ARACHNE && this.isSneaking()) {
             Vec3d look = this.getRotationVector();
-
-            // Increased strength:
-            // Forward multiplier: 1.2 -> 2.5
-            // Upward kick: 0.8 -> 1.3
             this.setVelocity(this.getVelocity().add(look.x * 2.5, 1.3, look.z * 2.5));
-
             this.velocityModified = true;
             this.velocityDirty = true;
             ci.cancel();
@@ -167,6 +180,13 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
             skillsList.add(NbtString.of(s.name()));
         }
         nbt.put("magia_unlocked_skills", skillsList);
+
+        // Skill Usages
+        NbtCompound usageTag = new NbtCompound();
+        for(Map.Entry<Skill, Integer> entry : skillUsage.entrySet()) {
+            usageTag.putInt(entry.getKey().name(), entry.getValue());
+        }
+        nbt.put("magia_skill_usage", usageTag);
     }
 
     @Inject(method = "readCustomDataFromNbt", at = @At("TAIL"))
@@ -199,6 +219,17 @@ public abstract class PlayerEntityMixin extends LivingEntity implements IPlayerR
             for (int i = 0; i < list.size(); i++) {
                 try {
                     this.unlockedSkills.add(Skill.valueOf(list.getString(i)));
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // Skill Usages
+        if (nbt.contains("magia_skill_usage")) {
+            NbtCompound usageTag = nbt.getCompound("magia_skill_usage");
+            for(String key : usageTag.getKeys()) {
+                try {
+                    Skill s = Skill.valueOf(key);
+                    this.skillUsage.put(s, usageTag.getInt(key));
                 } catch (Exception ignored) {}
             }
         }
