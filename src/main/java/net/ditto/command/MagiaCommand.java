@@ -28,8 +28,6 @@ public class MagiaCommand {
                     .then(CommandManager.literal("race")
                             .then(CommandManager.literal("set")
                                     // STRUCTURE CHANGED: /magia race set <RACE> [PLAYER]
-                                    // This prevents the game from suggesting player names when you try to type a race.
-
                                     .then(CommandManager.argument("race", StringArgumentType.word())
                                             .suggests((context, builder) -> CommandSource.suggestMatching(
                                                     Arrays.stream(Race.values()).map(Enum::name), builder))
@@ -59,6 +57,13 @@ public class MagiaCommand {
 
             // 2. CLEAR old unlocked skills so they don't persist
             playerCombat.clearUnlockedSkills();
+
+            // --- ADDED: Clear currently equipped skills ---
+            // This ensures the player cannot use their old race's skills that were sitting in the hotbar.
+            for (int i = 0; i < 5; i++) {
+                playerCombat.setEquippedSkill(i, Skill.NONE);
+            }
+            // ----------------------------------------------
 
             // 3. Unlock starting skills for the new race
             for (Skill s : race.getStartingSkills()) {
